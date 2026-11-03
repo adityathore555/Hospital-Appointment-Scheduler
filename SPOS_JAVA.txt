@@ -1,0 +1,414 @@
+
+import java.util.*;
+
+class Patient {
+    String id;
+    int arrivalTime;
+    int burstTime;
+    int remainingTime;
+    int completionTime;
+
+    Patient(String id, int arrivalTime, int burstTime) {
+        this.id = id;
+        this.arrivalTime = arrivalTime;
+        this.burstTime = burstTime;
+        this.remainingTime = burstTime;
+    }
+}
+
+class Event {
+    String patientId;
+    int start;
+    int end;
+
+    Event(String patientId, int start, int end) {
+        this.patientId = patientId;
+        this.start = start;
+        this.end = end;
+    }
+}
+
+public class HospitalAppointmentScheduler {
+
+    static Scanner sc = new Scanner(System.in);
+
+    // Read and validate integer input
+    static int readInt(String message) {
+        while (true) {
+            System.out.print(message);
+            try {
+                int value = Integer.parseInt(sc.nextLine().trim());
+                return value;
+            } catch (NumberFormatException e) {
+                System.out.println("Invalid input. Enter an integer.");
+            }
+        }
+    }
+
+    // Register patients
+    static List<Patient> registerPatients() {
+
+        int n;
+
+        do {
+            n = readInt("Enter number of patients: ");
+            if (n <= 0)
+                System.out.println("Enter at least one patient.");
+        } while (n <= 0);
+
+        List<Patient> patients = new ArrayList<>();
+        Set<String> ids = new HashSet<>();
+
+        for (int i = 0; i < n; i++) {
+
+            System.out.println("\nPatient " + (i + 1));
+
+            String id;
+
+            while (true) {
+                System.out.print("Enter Patient ID: ");
+                id = sc.nextLine().trim();
+
+                if (id.isEmpty()) {
+                    System.out.println("ID cannot be empty.");
+                } else if (!ids.add(id)) {
+                    System.out.println("Duplicate ID. Enter another ID.");
+                } else {
+                    break;
+                }
+            }
+
+            int arrival;
+
+            do {
+                arrival = readInt("Enter Arrival Time: ");
+                if (arrival < 0)
+                    System.out.println("Arrival time cannot be negative.");
+            } while (arrival < 0);
+
+            int burst;
+
+            do {
+                burst = readInt("Enter Consultation Time: ");
+                if (burst <= 0)
+                    System.out.println("Consultation time must be positive.");
+            } while (burst <= 0);
+
+            patients.add(new Patient(id, arrival, burst));
+        }
+
+        return patients;
+    }
+
+    // Create independent patient records for each simulation
+    static List<Patient> copyPatients(List<Patient> original) {
+
+        List<Patient> copy = new ArrayList<>();
+
+        for (Patient p : original) {
+            copy.add(new Patient(
+                p.id, p.arrivalTime, p.burstTime
+            ));
+        }
+
+        return copy;
+    }
+
+    // ROUND ROBIN SCHEDULING
+    static void roundRobin(List<Patient> original, int quantum) {
+
+        System.out.println("\n===== ROUND ROBIN SCHEDULING =====");
+
+        List<Patient> patients = copyPatients(original);
+
+        patients.sort(
+            Comparator.comparingInt(p -> p.arrivalTime)
+        );
+
+        Queue<Patient> readyQueue = new ArrayDeque<>();
+        List<Event> gantt = new ArrayList<>();
+
+        int time = 0;
+        int index = 0;
+        int completed = 0;
+        int n = patients.size();
+
+        while (completed < n) {
+
+            // Add newly arrived patients
+            while (index < n &&
+                   patients.get(index).arrivalTime <= time) {
+
+                readyQueue.add(patients.get(index));
+                index++;
+            }
+
+            // Handle CPU idle time
+            if (readyQueue.isEmpty()) {
+
+                int nextArrival = patients.get(index).arrivalTime;
+
+                gantt.add(new Event("IDLE", time, nextArrival));
+                time = nextArrival;
+
+                continue;
+            }
+
+            // Select first patient
+            Patient p = readyQueue.poll();
+
+            // Allocate time quantum
+            int execution = Math.min(
+                quantum, p.remainingTime
+            );
+
+            int start = time;
+            time += execution;
+
+            p.remainingTime -= execution;
+
+            gantt.add(new Event(p.id, start, time));
+
+            // Add newly arrived patients before re-queuing
+            while (index < n &&
+                   patients.get(index).arrivalTime <= time) {
+
+                readyQueue.add(patients.get(index));
+                index++;
+            }
+
+            if (p.remainingTime > 0) {
+
+                // Patient requires additional consultation time
+                readyQueue.add(p);
+
+            } else {
+
+                // Consultation completed
+                p.completionTime = time;
+                completed++;
+            }
+        }
+
+        printResults(patients, gantt);
+    }
+
+    // SHORTEST JOB FIRST - NON PREEMPTIVE
+    static void sjf(List<Patient> original) {
+
+        System.out.println(
+            "\n===== SHORTEST JOB FIRST SCHEDULING ====="
+        );
+
+        List<Patient> patients = copyPatients(original);
+
+        List<Event> gantt = new ArrayList<>();
+
+        int time = 0;
+        int completed = 0;
+        int n = patients.size();
+
+        boolean[] done = new boolean[n];
+
+        while (completed < n) {
+
+            int selected = -1;
+
+            // Find shortest available consultation
+            for (int i = 0; i < n; i++) {
+
+                if (!done[i] &&
+                    patients.get(i).arrivalTime <= time) {
+
+                    if (selected == -1 ||
+                        patients.get(i).burstTime <
+                        patients.get(selected).burstTime) {
+
+                        selected = i;
+                    }
+                }
+            }
+
+            // Handle idle time
+            if (selected == -1) {
+
+                int nextArrival = Integer.MAX_VALUE;
+
+                for (int i = 0; i < n; i++) {
+
+                    if (!done[i]) {
+                        nextArrival = Math.min(
+                            nextArrival,
+                            patients.get(i).arrivalTime
+                        );
+                    }
+                }
+
+                gantt.add(new Event("IDLE", time, nextArrival));
+                time = nextArrival;
+
+                continue;
+            }
+
+            Patient p = patients.get(selected);
+
+            int start = time;
+
+            // Non-preemptive execution
+            time += p.burstTime;
+
+            p.completionTime = time;
+            done[selected] = true;
+            completed++;
+
+            gantt.add(new Event(p.id, start, time));
+        }
+
+        printResults(patients, gantt);
+    }
+
+    // DISPLAY GANTT CHART AND PERFORMANCE METRICS
+    static void printResults(
+        List<Patient> patients,
+        List<Event> gantt
+    ) {
+
+        System.out.println("\n========== GANTT CHART ==========");
+
+        for (Event e : gantt) {
+            System.out.print("| " + e.patientId + " ");
+        }
+
+        System.out.println("|");
+
+        for (Event e : gantt) {
+            System.out.printf("%-5d", e.start);
+        }
+
+        if (!gantt.isEmpty()) {
+            System.out.println(
+                gantt.get(gantt.size() - 1).end
+            );
+        }
+
+        System.out.println(
+            "\n========== PERFORMANCE RESULTS =========="
+        );
+
+        System.out.printf(
+            "%-12s %-8s %-8s %-8s %-8s %-8s%n",
+            "Patient", "AT", "BT", "CT", "WT", "TAT"
+        );
+
+        double totalWT = 0;
+        double totalTAT = 0;
+
+        for (Patient p : patients) {
+
+            int tat = p.completionTime - p.arrivalTime;
+            int wt = tat - p.burstTime;
+
+            totalWT += wt;
+            totalTAT += tat;
+
+            System.out.printf(
+                "%-12s %-8d %-8d %-8d %-8d %-8d%n",
+                p.id,
+                p.arrivalTime,
+                p.burstTime,
+                p.completionTime,
+                wt,
+                tat
+            );
+        }
+
+        int n = patients.size();
+
+        System.out.println("--------------------------------------------");
+
+        System.out.printf(
+            "Average Waiting Time    : %.2f minutes%n",
+            totalWT / n
+        );
+
+        System.out.printf(
+            "Average Turnaround Time : %.2f minutes%n",
+            totalTAT / n
+        );
+
+        System.out.println(
+            "\nScheduling completed successfully."
+        );
+    }
+
+    // MAIN METHOD
+    public static void main(String[] args) {
+
+        System.out.println(
+            "========================================"
+        );
+
+        System.out.println(
+            "    HOSPITAL APPOINTMENT SCHEDULER"
+        );
+
+        System.out.println(
+            "========================================"
+        );
+
+        List<Patient> patients = registerPatients();
+
+        while (true) {
+
+            System.out.println("\nChoose Scheduling Algorithm:");
+
+            System.out.println("1. Round Robin");
+            System.out.println("2. Shortest Job First (SJF)");
+            System.out.println("3. Exit");
+
+            int choice = readInt("Enter your choice: ");
+
+            switch (choice) {
+
+                case 1:
+
+                    int quantum;
+
+                    do {
+                        quantum = readInt(
+                            "Enter Time Quantum: "
+                        );
+
+                        if (quantum <= 0)
+                            System.out.println(
+                                "Time quantum must be positive."
+                            );
+
+                    } while (quantum <= 0);
+
+                    roundRobin(patients, quantum);
+                    break;
+
+                case 2:
+
+                    sjf(patients);
+                    break;
+
+                case 3:
+
+                    System.out.println(
+                        "Exiting Hospital Appointment Scheduler."
+                    );
+
+                    sc.close();
+                    return;
+
+                default:
+
+                    System.out.println(
+                        "Invalid choice. Try again."
+                    );
+            }
+        }
+    }
+}
